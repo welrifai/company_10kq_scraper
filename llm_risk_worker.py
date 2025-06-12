@@ -4,18 +4,18 @@ import concurrent.futures
 from edgar_sp500_scraper import DB_PATH, llm_parse_risks, save_risks_to_db_llm
 
 def process_single_filing(filing_id, risk_factors):
-    print(f"Processing filing_id={filing_id}...")
+    print(f"[risk_worker] Processing filing_id={filing_id}...")
     try:
         risks_llm = llm_parse_risks(risk_factors)
         if risks_llm:
-            print(f"  LLM extracted {len(risks_llm)} risks.")
+            print(f"[risk_worker] LLM extracted {len(risks_llm)} risks.")
             save_risks_to_db_llm(filing_id, risks_llm)
             status = 'done'
         else:
-            print(f"  LLM did not extract risks.")
+            print(f"[risk_worker] LLM did not extract risks.")
             status = 'error'
     except Exception as e:
-        print(f"  LLM error: {e}")
+        print(f"[risk_worker] LLM error: {e}")
         status = 'error'
     # Update llm_status
     conn2 = sqlite3.connect(DB_PATH)
@@ -37,7 +37,7 @@ def process_pending_llm(limit=5, sleep_time=1.0):
     rows = c.fetchall()
     conn.close()
     if not rows:
-        print("No pending filings for LLM processing.")
+        print("[risk_worker] No pending filings for LLM processing.")
         return
     for filing_id, risk_factors in rows:
         print(f"Processing filing_id={filing_id}...")
@@ -62,27 +62,24 @@ def process_pending_llm(limit=5, sleep_time=1.0):
         time.sleep(sleep_time)
 
 def process_pending_llm_parallel(limit=20, max_workers=4, sleep_time=1.0):
-    """
-    Process filings with llm_status='pending' in parallel using ThreadPoolExecutor.
-    limit: number of filings to process per run (for batching)
-    max_workers: number of parallel LLM calls
-    sleep_time: seconds to sleep between LLM calls (rate limiting per worker)
-    """
+    print(f"[risk_worker] Starting batch: limit={limit}, max_workers={max_workers}, sleep={sleep_time}")
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("SELECT id, risk_factors FROM filings WHERE llm_status='pending' AND risk_factors IS NOT NULL LIMIT ?", (limit,))
     rows = c.fetchall()
     conn.close()
     if not rows:
-        print("No pending filings for LLM processing.")
+        print("[risk_worker] No pending filings for LLM processing.")
         return
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = []
         for filing_id, risk_factors in rows:
+            print(f"[risk_worker] Queueing filing_id={filing_id}")
             futures.append(executor.submit(process_single_filing, filing_id, risk_factors))
             time.sleep(sleep_time)  # crude global rate limit
         for future in concurrent.futures.as_completed(futures):
             future.result()
+    print(f"[risk_worker] Batch complete. Processed {len(rows)} filings.")
 
 if __name__ == "__main__":
     import argparse

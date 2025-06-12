@@ -126,41 +126,51 @@ def init_db():
         id INTEGER PRIMARY KEY,
         cik TEXT,
         ticker TEXT,
+        company_name TEXT,  -- new column
         form TEXT,
         filed DATE,
         accession TEXT,
         local_path TEXT,
         risk_factors TEXT,
-        llm_status TEXT DEFAULT 'pending' -- new column for LLM queue
+        llm_status TEXT DEFAULT 'pending'
     )''')
     c.execute('''CREATE TABLE IF NOT EXISTS risks (
         id INTEGER PRIMARY KEY,
         filing_id INTEGER,
         risk_text TEXT,
         category TEXT,
+        mitigation_idea TEXT,  -- new column for mitigation idea
+        mitigation_rank INTEGER,  -- new column for mitigation rank
         FOREIGN KEY(filing_id) REFERENCES filings(id)
     )''')
-    # Add llm_status column if it doesn't exist (for upgrades)
+    # Add columns if they don't exist (for upgrades)
     try:
-        c.execute("ALTER TABLE filings ADD COLUMN llm_status TEXT DEFAULT 'pending'")
+        c.execute("ALTER TABLE filings ADD COLUMN company_name TEXT")
     except sqlite3.OperationalError:
-        pass  # column already exists
+        pass
+    try:
+        c.execute("ALTER TABLE risks ADD COLUMN mitigation_idea TEXT")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        c.execute("ALTER TABLE risks ADD COLUMN mitigation_rank INTEGER")
+    except sqlite3.OperationalError:
+        pass
     conn.commit()
     conn.close()
 
-def save_filing_to_db(cik, ticker, form, filed, accession, local_path, risk_factors):
+def save_filing_to_db(cik, ticker, form, filed, accession, local_path, risk_factors, company_name=None):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    # Check if this filing already exists
     c.execute('''SELECT id FROM filings WHERE cik=? AND form=? AND filed=? AND accession=?''',
               (cik, form, filed, accession))
     result = c.fetchone()
     if result:
         filing_id = result[0]
     else:
-        c.execute('''INSERT INTO filings (cik, ticker, form, filed, accession, local_path, risk_factors, llm_status)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
-                  (cik, ticker, form, filed, accession, local_path, risk_factors, 'pending' if risk_factors else None))
+        c.execute('''INSERT INTO filings (cik, ticker, company_name, form, filed, accession, local_path, risk_factors, llm_status)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                  (cik, ticker, company_name, form, filed, accession, local_path, risk_factors, 'pending' if risk_factors else None))
         filing_id = c.lastrowid
         conn.commit()
     conn.close()
